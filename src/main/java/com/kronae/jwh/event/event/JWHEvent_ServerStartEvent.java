@@ -1,0 +1,14 @@
+package com.kronae.jwh.event.event;
+
+import com.kronae.jwh.JWH;
+import com.kronae.jwh.event.JWHEvent;
+
+public class JWHEvent_ServerStartEvent implements JWHEvent {
+    private final JWH web;
+    public JWHEvent_ServerStartEvent(JWH web) {
+        this.web = web;
+    }
+    public JWH getWeb() {
+        return web;
+    }
+}

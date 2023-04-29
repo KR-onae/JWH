@@ -3,10 +3,13 @@ package com.kronae.jwh;
 import com.kronae.jwh.event.JWHEvent;
 import com.kronae.jwh.event.JWHEventHandler;
 import com.kronae.jwh.event.JWHEventListener;
-import com.kronae.jwh.event.event.JWHEvent_ServerOpenEvent;
+import com.kronae.jwh.event.event.JWHEvent_RequestEvent;
+import com.kronae.jwh.event.event.JWHEvent_ServerStartEvent;
+import com.kronae.jwh.event.event.JWHEvent_ServerStopEvent;
 import com.kronae.jwh.request.JWHRequest;
 import com.kronae.jwh.request.JWHRequestHandler;
 import com.kronae.jwh.response.JWHResponse;
+import com.kronae.jwh.util.JWHEventHelper;
 import com.kronae.jwh.util.api.JWHApi;
 import com.sun.net.httpserver.*;
 import org.jetbrains.annotations.NotNull;
@@ -26,7 +29,7 @@ public class JWH {
     private HttpServer server = null;
     private ArrayList<JWHRequestHandler> handlers;
     public Charset charset;
-    private Map<Class<? extends JWHEvent>, ArrayList<Method>> eventListener;
+    private Map<Class<? extends JWHEvent>, ArrayList<JWHEventHelper>> eventListener;
 
     public JWH(@Range(from=0, to=65536) int port) {
         try {
@@ -41,9 +44,12 @@ public class JWH {
         charset  = Charset.defaultCharset();
 
         server.createContext("/", exchange -> {
+            JWHRequest req = JWHRequest.fromExchange(exchange);
+            JWHResponse res = JWHResponse.fromExchange(exchange, charset);
+            callEvent(new JWHEvent_RequestEvent(req));
             for (JWHRequestHandler handler : handlers) {
                 try {
-                    handler.handle(JWHRequest.fromExchange(exchange), JWHResponse.fromExchange(exchange, charset));
+                    handler.handle(req, res);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -70,8 +76,8 @@ public class JWH {
                 continue;
 
             if(eventClass == null || params[0] == eventClass) {
-                ArrayList<Method> listeners = eventListener.getOrDefault(eventClass, new ArrayList<>());
-                listeners.add(method);
+                ArrayList<JWHEventHelper> listeners = eventListener.getOrDefault(eventClass, new ArrayList<>());
+                listeners.add(new JWHEventHelper(method, listener));
                 if(eventClass == null) {
                     eventListener.put((Class<? extends JWHEvent>) params[0], listeners);
                 } else {
@@ -83,23 +89,9 @@ public class JWH {
     public void callEvent(JWHEvent event) {
         eventListener.forEach((eventClass, methods) -> {
             if(event.getClass() == eventClass) {
-                methods.forEach(method -> {
-                    Class<?> clazz = method.getDeclaringClass();
-
-                    Object instance;
-                    try {
-                        instance = clazz.getConstructor().newInstance();
-                    } catch (NoSuchMethodException e) {
-                        e.printStackTrace(System.err);
-                        System.err.println("JWH: JWH.java: ERROR: Cannot find");
-                        return;
-                    } catch (IllegalAccessException e) {
-                        e.printStackTrace(System.err);
-                        System.err.println("JWH: JWH.java: ERROR: Cannot access to the class/method!");
-                        return;
-                    } catch (InvocationTargetException | InstantiationException e) {
-                        throw new RuntimeException(e);
-                    }
+                methods.forEach(helper -> {
+                    Method method = helper.getMethod();
+                    Object instance = helper.getInstance();
 
                     try {
                         method.invoke(instance, event);
@@ -113,9 +105,10 @@ public class JWH {
     public void start() {
         server.setExecutor(null);
         server.start();
-        callEvent(new JWHEvent_ServerOpenEvent(this));
+        callEvent(new JWHEvent_ServerStartEvent(this));
     }
-    public void stop(int delay) {
-        server.stop(delay);
+    public void stop() {
+        server.stop(0);
+        callEvent(new JWHEvent_ServerStopEvent(this));
     }
 }
